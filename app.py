@@ -1,22 +1,17 @@
 import streamlit as st
 import time
+import json
 import gspread
 from google.oauth2.service_account import Credentials
-import json
-
-credentials = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"], # <-- 웹에 등록된 걸 가져와라!
-    scopes=scopes
-)
 
 # --- 페이지 설정 ---
 st.set_page_config(page_title="AI Dispatch Simulator", layout="wide")
 
-# --- 세션 상태 초기화 (Round 관리) ---
+# --- 세션 상태 초기화 ---
 if 'round' not in st.session_state:
     st.session_state.round = 1
 if 'history' not in st.session_state:
-    st.session_state.history = [] # 로그 저장용
+    st.session_state.history = [] 
 if 'current_prompt' not in st.session_state:
     st.session_state.current_prompt = """
 [System Role]
@@ -25,9 +20,9 @@ if 'current_prompt' not in st.session_state:
 
 [Goal]
 가장 효율적인 배차를 수행하여 고객 대기 시간을 최소화하세요.
-""" # 초기 프롬프트
+"""
 
-# --- 시나리오 데이터 (Round 1~5) ---
+# --- 시나리오 데이터 ---
 scenarios = {
     1: {
         "title": "Round 1: 런치 타임 피크 (Efficiency)",
@@ -66,33 +61,35 @@ scenarios = {
     }
 }
 
-# --- UI 레이아웃 ---
+# --- 메인 로직 (화면 분기) ---
 
-# [A] 실험이 모두 끝났을 때 (Round 6 이상) -> 저장 화면 출력
+# [A] 실험 종료 화면 (저장 기능 포함)
 if st.session_state.round > 5:
     st.balloons()
     st.title("🎉 모든 시뮬레이션 종료")
     st.success("수고하셨습니다! 아래 버튼을 눌러 데이터를 저장해주세요.")
 
-    # --- 구글 시트 저장 함수 ---
+    # --- 구글 시트 저장 함수 (내부 정의) ---
     def save_to_google_sheet(data):
         try:
-            # 1. Secrets에서 열쇠 꺼내기
+            # 1. Scopes 정의 (여기에 있어야 에러가 안 남!)
             scopes = [
                 "https://www.googleapis.com/auth/spreadsheets",
                 "https://www.googleapis.com/auth/drive"
             ]
+            
+            # 2. Secrets에서 키 가져오기
             credentials = Credentials.from_service_account_info(
                 st.secrets["gcp_service_account"],
                 scopes=scopes
             )
             gc = gspread.authorize(credentials)
             
-            # 2. 시트 열기
-            sh = gc.open("실험결과_자동저장") # <-- 교수님 시트 제목과 똑같아야 함!
+            # 3. 시트 열기
+            sh = gc.open("실험결과_자동저장") # 시트 제목 확인!
             worksheet = sh.sheet1
             
-            # 3. 데이터 저장
+            # 4. 데이터 저장
             log_string = json.dumps(data, ensure_ascii=False)
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             worksheet.append_row([timestamp, log_string])
@@ -101,17 +98,17 @@ if st.session_state.round > 5:
             st.error(f"저장 중 오류 발생: {e}")
             return False
 
-    # --- 저장 버튼 ---
+    # 저장 버튼
     if st.button("☁️ 데이터 클라우드에 저장하기"):
         with st.spinner("구글 시트에 기록 중..."):
             if save_to_google_sheet(st.session_state.history):
                 st.success("✅ 저장 완료! 브라우저를 닫으셔도 됩니다.")
-                
-    # (선택) 내 기록 확인용
+
+    # 기록 확인
     with st.expander("내 답변 기록 확인하기"):
         st.json(st.session_state.history)
 
-# [B] 아직 실험 중일 때 (Round 1~5) -> 게임 화면 출력
+# [B] 실험 진행 화면 (Round 1~5)
 else:
     current_data = scenarios[st.session_state.round]
     st.title(f"{current_data['image']} {current_data['title']}")
@@ -135,12 +132,11 @@ else:
         "System Prompt",
         value=st.session_state.current_prompt,
         height=300,
-        key=f"prompt_input_{st.session_state.round}" # Key를 바꿔서 리셋 방지
+        key=f"prompt_input_{st.session_state.round}"
     )
 
-    # 업데이트 및 다음 단계 버튼
+    # 다음 버튼
     if st.button("프롬프트 업데이트 및 시뮬레이션 실행"):
-        # 1. 기록 저장
         st.session_state.history.append({
             "round": st.session_state.round,
             "prompt": user_input,
@@ -148,7 +144,6 @@ else:
         })
         st.session_state.current_prompt = user_input
         
-        # 2. 로딩 효과 및 라운드 넘기기
         with st.spinner("AI 시뮬레이션 중..."):
             time.sleep(1.5)
         
