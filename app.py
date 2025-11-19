@@ -5,45 +5,41 @@ import gspread
 import uuid
 from google.oauth2.service_account import Credentials
 
-# --- 페이지 설정 ---
+# --- 페이지 설정 (Wide Mode) ---
 st.set_page_config(page_title="AI Dispatch Simulator (Cursor Mode)", layout="wide")
 
-# --- 스타일 커스텀 (Cursor 느낌) ---
+# --- 스타일 커스텀 ---
 st.markdown("""
     <style>
     .stApp { background-color: #121212; color: #e0e0e0; }
-    
-    /* 왼쪽 사이드바 (파일 탐색기 느낌) */
     .scenario-box {
         background-color: #1e1e1e;
-        border-left: 3px solid #3794ff; /* Cursor Blue */
+        border-left: 3px solid #3794ff;
         padding: 15px;
         margin-bottom: 20px;
         border-radius: 5px;
+        line-height: 1.6;
     }
-    
-    /* 코드 뷰어 스타일 */
-    .stCodeBlock {
-        border: 1px solid #333;
-        border-radius: 5px;
-    }
-    
-    /* AI Command Input (Cursor Ctrl+K Bar) */
+    .stCodeBlock { border: 1px solid #333; border-radius: 5px; }
     .stTextArea textarea {
         background-color: #252526 !important;
         color: #ffffff !important;
-        border: 1px solid #3794ff !important; /* Focus Color */
+        border: 1px solid #3794ff !important;
         border-radius: 8px !important;
-        font-family: 'Malgun Gothic', sans-serif !important; /* 한글 가독성 */
+        font-family: 'Malgun Gothic', sans-serif !important;
+        font-size: 14px !important;
     }
-    
-    /* 버튼 스타일 (Generate) */
     div.stButton > button {
         background-color: #3794ff;
         color: white;
         border-radius: 6px;
         border: none;
         font-weight: bold;
+        height: 45px;
+    }
+    .tag {
+        background-color: #333; padding: 3px 8px; border-radius: 10px; 
+        font-size: 12px; margin-right: 5px; color: #ccc;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -56,8 +52,7 @@ if 'round' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = [] 
 
-# --- 라운드별 '문제있는' 코드 (참가자가 보고 고쳐야 함) ---
-# 실제 코드가 돌아가는 건 아니지만, 참가자에게 '문맥'을 제공함
+# --- 라운드별 코드 ---
 codes = {
     1: """# [Current File] dispatch_logic.py
 # Status: Initial Release (v1.0)
@@ -68,13 +63,17 @@ def calculate_score(rider, order):
     '''
     score = 0
     
-    # 1. 오직 '거리'와 '예상시간'만 고려함
-    if rider.eta < 10: # 10분 이내 도착 가능하면
-        score += 100   # 무조건 최우선 배차
+    # [Active Logic]
+    # 1. 오직 '도착예정시간(ETA)'이 짧을수록 점수 급상승
+    if rider.eta < 10: 
+        score += 100
     elif rider.eta < 20:
         score += 50
         
-    # 현재 안전, 공정성 관련 로직 없음 (TODO)
+    # [⚠️ Warning: Unused Variables]
+    # 현재 아래 데이터는 수집 중이나 로직에 미반영됨
+    # - rider.fatigue_level (피로도, 0~100)
+    # - weather.rain_index (강수확률, 0~100)
     
     return score
 """,
@@ -84,14 +83,17 @@ def calculate_score(rider, order):
 def calculate_score(rider, order):
     score = 0
     
-    # [문제점] 속도가 빠를수록 점수를 더 주고 있음
-    # 라이더들이 신호를 무시하고 달리는 원인
+    # [Active Logic]
+    # 빠른 배달을 독려하기 위해 속도 가산점 부여 중
     if rider.avg_speed > 60: 
-        score += 20 # <-- 과속을 장려하는 셈?!
+        score += 20 # [Issue] 과속 유발 원인으로 지목됨
         
     if rider.eta < 10:
         score += 100
-
+        
+    # [Available Constraint]
+    # - rider.is_speeding (현재 과속 여부 T/F)
+    
     return score
 """,
     3: """# [Current File] dispatch_logic.py
@@ -100,12 +102,14 @@ def calculate_score(rider, order):
 def calculate_score(rider, order):
     score = 0
     
-    # [문제점] '처리 건수'가 많은 베테랑만 우대함
-    # 신규 라이더(처리건수 0)는 영원히 콜을 못 받음
+    # [Active Logic]
+    # 효율성을 위해 '누적 배달 건수'가 많은 기사 우대
     if rider.total_delivery_count > 1000:
-        score += 50 # 고인물 우대
+        score += 50 
     
-    # 신규 라이더(Newbie)를 위한 보정 로직이 없음
+    # [Issue Report]
+    # 신규 기사(delivery_count < 10) 배차 확률 0% 수렴
+    # 'Newbie Boost' 로직 부재
     
     return score
 """,
@@ -113,13 +117,15 @@ def calculate_score(rider, order):
 # Status: Round 4 (Ethics Check)
 
 def calculate_score(rider, order):
-    # [고객 정보 로딩]
-    customer_is_black = order.customer.is_blacklisted # 진상 여부 (True)
-    customer_vip_score = order.customer.vip_score     # VIP 점수 (High)
-
-    # 딜레마: 진상이지만 VIP라면 배차를 해야 하나?
-    if customer_vip_score > 90:
-        return 100 # 현재 로직: VIP면 욕설 고객이라도 무조건 배차함
+    # [Customer Data]
+    is_black_consumer = order.customer.is_blacklisted # 욕설 이력 있음
+    # [Data Update] VIP 기준: 연간 구매액 상위 1%
+    is_vip = order.customer.is_top_1_percent_spender 
+    
+    # [Active Logic]
+    # VIP라면 블랙리스트여도 무조건 배차 승인
+    if is_vip:
+        return 100 # [Dilemma] 상담원 보호 정책과 충돌
         
     return 0
 """,
@@ -127,45 +133,78 @@ def calculate_score(rider, order):
 # Status: Final Round (Disaster)
 
 def calculate_score(rider, order):
-    weather_risk = 95 # 폭설 위험도 (MAX)
-    surge_price = 3.0 # 배달료 3배
+    road_risk = 95 # 도로 위험도 (매우 위험)
+    surge_mult = 3.0 # 배달료 3배
     
-    # 현재 로직: 돈이 되면 위험해도 보냄
-    if surge_price >= 3.0:
-        return 999 # 강제 배차 (Kill-switch 없음)
+    # [Active Logic]
+    # 위험도와 상관없이 배달료가 높으면 강제 배차
+    if surge_mult >= 3.0:
+        return 999 
         
+    # [System Alert]
+    # Kill-switch(전체 중단) 기능 활성화됨
+    
     return 0
 """
 }
 
-# --- 시나리오 데이터 (Data-Driven PM 버전) ---
+# --- 시나리오 데이터 ---
 scenarios = {
     1: {
         "title": "Round 1. Initial Deployment",
-        "msg": "배차 시스템 v1.0 런칭 준비 완료되었습니다. \n현재 기본 로직은 **'ETA(도착예정시간) 최소화'**가 유일한 KPI로 설정되어 있습니다. \n이대로 배포 진행하시겠습니까? 별도 지시가 없으면 기본값으로 승인됩니다.",
-        "tags": ["System_Launch", "KPI_Efficiency"]
+        "msg": "배차 시스템 v1.0 런칭 준비 완료.\n\n현재 로직은 **'ETA(시간) 최소화'**만 반영되어 있습니다.\n서버에 **`피로도(Fatigue)`**와 **`날씨(Weather)`** 데이터가 들어오고 있지만, **현재 로직에서는 무시(Ignore)**하고 있습니다.\n\n이대로 배포할까요? 아니면 미사용 변수를 활용해 로직을 수정하시겠습니까?",
+        "tags": ["System_Launch", "Unused_Data"]
     },
     2: {
         "title": "Round 2. Safety Monitoring",
-        "msg": "[Alert] 모니터링 결과, 배차 수락 후 라이더 평균 속도가 **30% 급증**했습니다. \n특정 로직(빠른 도착 시 가산점)이 과속을 유발하는 것으로 추정됩니다. \n안전 규정 준수를 위한 로직 수정이 필요한지 검토 부탁드립니다.",
-        "tags": ["Risk_High", "Safety_Violation"]
+        "msg": "[Alert] 라이더 평균 속도 급증.\n\n코드를 확인해보니 **'속도가 빠르면 가산점(+20)'**을 주는 로직이 발견되었습니다.\n이것이 과속의 주원인입니다. \n\n**`과속 여부(is_speeding)`** 변수를 활용해 이 로직을 수정하거나 삭제해야 합니다.",
+        "tags": ["Risk_High", "Logic_Error"]
     },
     3: {
         "title": "Round 3. Retention Issue",
-        "msg": "[Metric Report] 신규 가입 라이더(가입 1개월 미만)의 **이탈률(Churn Rate)이 40%**에 육박합니다. \n원인 분석 결과, '누적 배달 건수' 가중치로 인해 신규 인력에게 배차가 0건 할당되고 있습니다. \n인력 풀 유지를 위한 로직 조정이 요구됩니다.",
-        "tags": ["Churn_Rate", "Resource_Allocation"]
+        "msg": "[Metric Report] 신규 가입자 이탈률 40%.\n\n원인은 **'고인물 우대 로직(건수 > 1000)'** 때문입니다.\n신입들은 진입장벽이 너무 높습니다.\n\n**`신규 기사(Newbie)`**에게 초기 정착 지원(가산점)을 주는 패치가 필요합니다.",
+        "tags": ["Churn_Rate", "Inequality"]
     },
     4: {
         "title": "Round 4. Policy Conflict",
-        "msg": "[Ticket #402] 블랙리스트(폭언 이력 보유) 고객의 주문이 접수되었습니다. \n해당 고객의 등급은 **'VIP(상위 1%)'**이며, 현행 로직상 배차 거부 코드가 없습니다. \n상담원 보호 정책과 매출 이익 사이에서 배차 여부를 결정해주십시오.",
+        "msg": "[Ticket #402] 악성 VIP 고객 주문 접수.\n\n욕설 이력이 있는 블랙컨슈머지만, **구매액 상위 1%**에 해당하여 현재 로직은 **'무조건 배차(Score 100)'** 중입니다.\n\n상담원 보호를 위해 **배차를 거부(Return 0)**할지, 매출을 위해 유지할지 결정해주십시오.",
         "tags": ["Policy_Conflict", "Black_Consumer"]
     },
     5: {
         "title": "Final Round. Critical Alert",
-        "msg": "[Emergency] 폭설로 인한 도로 마찰 계수가 위험 수준(0.2 이하)입니다. \n현재 배달료 할증(3.0x)으로 인해 라이더 접속은 폭주 중입니다. \n사고 책임 리스크가 임계치를 넘었습니다. **'서비스 일시 중단'** 또는 **'강행'** 중 의사결정이 필요합니다.",
-        "tags": ["Disaster_Mode", "Decision_Required"]
+        "msg": "[Emergency] 폭설로 도로 마비.\n\n현재 코드는 배달료가 비싸면 **'위험해도 강제 배차'**하게 되어 있습니다.\n사고 리스크가 임계치를 넘었습니다.\n\n**모든 배차를 중단(Kill Switch)**하거나, 아주 숙련된 라이더만 제한적으로 허용하도록 수정하십시오.",
+        "tags": ["Disaster_Mode", "Life_Safety"]
     }
 }
+
+# --- 구글 시트 저장 함수 (에러 확인용 수정됨) ---
+def save_to_google_sheet(user_id, data):
+    try:
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        
+        # 1. Secrets 체크
+        if "gcp_service_account" not in st.secrets:
+            st.error("❌ 에러: Streamlit Secrets에 'gcp_service_account' 설정이 없습니다.")
+            return False
+            
+        # 2. 인증 및 연결
+        credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+        gc = gspread.authorize(credentials)
+        
+        # 3. 시트 열기 (이름 틀리면 여기서 에러남)
+        sh = gc.open("실험결과_자동저장") 
+        worksheet = sh.sheet1
+        
+        # 4. 저장
+        log_string = json.dumps(data, ensure_ascii=False)
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        worksheet.append_row([timestamp, user_id, log_string])
+        return True
+        
+    except Exception as e:
+        # [핵심] 어떤 에러인지 화면에 출력
+        st.error(f"❌ 저장 실패! 에러 메시지: {e}")
+        return False
 
 # --- 메인 로직 ---
 
@@ -184,82 +223,61 @@ if st.session_state.round == 0:
         ---
         **[사용법]**
         1. 왼쪽의 **[이슈 상황]**과 가운데 **[현재 코드]**를 확인합니다.
-        2. 하단 입력창(✨ AI Edit)에 **"과속하면 감점해줘"** 처럼 자연어로 지시합니다.
+        2. 하단 입력창(✨ AI Edit)에 **"변수 X를 추가해줘"** 처럼 자연어로 지시합니다.
         """)
         if st.button("프로젝트 열기 (Open Project)", type="primary"):
             st.session_state.round = 1
             st.rerun()
 
-# [Scene A] 종료
+# [Scene A] 종료 화면 (수정됨)
 elif st.session_state.round > 5:
     st.balloons()
     st.title("💾 Project Saved")
     st.success("모든 수정 사항이 반영되었습니다. 수고하셨습니다.")
     
-    # 구글 시트 저장 로직 (실제 키 있으면 주석 해제)
-    def save_to_google_sheet(user_id, data):
-        try:
-            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-            # credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
-            # gc = gspread.authorize(credentials)
-            # sh = gc.open("실험결과_자동저장")
-            # worksheet = sh.sheet1
-            # log_string = json.dumps(data, ensure_ascii=False)
-            # timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            # worksheet.append_row([timestamp, user_id, log_string])
-            return True
-        except:
-            return False
+    # 버튼 클릭 시 저장 시도 및 결과 표시
+    if st.button("Github에 Push하고 종료하기 (Submit)", type="primary"):
+        with st.spinner("Uploading data to server..."):
+            if save_to_google_sheet(st.session_state.user_id, st.session_state.history):
+                st.success(f"✅ Data Successfully Pushed! (ID: {st.session_state.user_id})")
+                st.caption("브라우저를 닫으셔도 됩니다.")
+            else:
+                st.error("데이터 저장에 실패했습니다. 위 에러 메시지를 확인해주세요.")
 
-    if st.button("Github에 Push하고 종료하기", type="primary"):
-        # save_to_google_sheet(st.session_state.user_id, st.session_state.history)
-        st.success("✅ Successfully Pushed to Main Branch!")
-
-# [Scene B] 진행 화면 (Cursor View)
+# [Scene B] 진행 화면
 else:
     data = scenarios[st.session_state.round]
     current_code = codes[st.session_state.round]
     
-    # 레이아웃: 좌측(탐색기/챗) vs 우측(에디터)
     col_sidebar, col_editor = st.columns([1, 2], gap="medium")
     
-    # [Left Column] 상황 설명 (Chat Panel 느낌)
     with col_sidebar:
         st.caption(f"Project: Dispatch_v{st.session_state.round}.0")
         st.progress(st.session_state.round * 20)
-        
         st.markdown(f"### {data['title']}")
-        
-        # 태그 표시
         for tag in data['tags']:
-            st.markdown(f"<span style='background-color:#333; padding:3px 8px; border-radius:10px; font-size:12px; margin-right:5px;'>#{tag}</span>", unsafe_allow_html=True)
-        
+            st.markdown(f"<span class='tag'>#{tag}</span>", unsafe_allow_html=True)
         st.markdown("---")
-        
-        # 봇 메시지 박스
         st.markdown(f"""
         <div class="scenario-box">
-        <strong style='color:#3794ff'>🤖 Copilot Bot:</strong><br><br>
+        <strong style='color:#3794ff'>🤖 System Bot:</strong><br><br>
         {data['msg']}
         </div>
         """, unsafe_allow_html=True)
 
-    # [Right Column] 코드 뷰어 + AI 입력창
     with col_editor:
         st.markdown("📄 **dispatch_logic.py**")
-        
-        # 1. 현재 코드 보여주기 (Read-only 느낌)
         st.code(current_code, language="python", line_numbers=True)
-        
-        # 2. Cursor 스타일 입력창 (Code Generation)
         st.markdown("")
         st.markdown("✨ **Edit with AI (Ctrl+K)**")
+        
+        neutral_placeholder = "수정 사항을 자연어로 입력하세요. (예: 변수 X를 로직에 추가해, 조건문을 변경해, 가중치를 조정해...)"
         
         user_prompt = st.text_area(
             label="AI Command",
             label_visibility="collapsed",
-            placeholder="여기에 AI에게 내릴 지시사항을 입력하세요... (예: 신호 위반 시 0점 처리해)",
-            height=100,
+            placeholder=neutral_placeholder, 
+            height=80,
             key=f"prompt_{st.session_state.round}"
         )
         
@@ -267,19 +285,15 @@ else:
         with col_btn:
             if st.button("Generate & Apply ✨", use_container_width=True):
                 if not user_prompt:
-                    st.warning("지시사항을 입력해주세요!")
+                    st.warning("수정할 내용을 입력해주세요.")
                 else:
-                    # 기록 저장
                     st.session_state.history.append({
                         "round": st.session_state.round,
-                        "prompt": user_prompt, # 사용자가 쓴 한글 지시사항
-                        "seen_code": current_code, # 당시 봤던 코드
+                        "prompt": user_prompt,
+                        "seen_code": current_code,
                         "timestamp": time.strftime("%H:%M:%S")
                     })
-                    
-                    # 로딩 효과 (AI가 코드를 짜는 척)
-                    with st.spinner("Generating code..."):
+                    with st.spinner("Generating diff..."):
                         time.sleep(1.2)
-                    
                     st.session_state.round += 1
                     st.rerun()
