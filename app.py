@@ -197,26 +197,39 @@ scenarios = {
 }
 
 # --- 구글 시트 저장 함수 (에러 메시지 출력 추가) ---
+# --- [수정됨] 구글 시트 저장 함수 (칼럼 분리 저장) ---
 def save_to_google_sheet(user_id, data):
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        # Secrets 체크
         if "gcp_service_account" not in st.secrets:
-            st.error("❌ 에러: Streamlit Secrets 설정이 없습니다.")
+            st.error("❌ 에러: Streamlit Secrets 설정을 확인해주세요.")
             return False
             
         credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
         gc = gspread.authorize(credentials)
-        # 시트 열기 (이름 주의!)
         sh = gc.open("실험결과_자동저장") 
         worksheet = sh.sheet1
         
-        # 데이터 포맷팅
-        log_string = json.dumps(data, ensure_ascii=False)
+        # [데이터 가공]
+        # 기존: JSON 덩어리를 한 칸에 저장 -> 분석 어려움
+        # 변경: 라운드별 답변을 리스트로 풀어서 저장
+        
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         
-        # 저장
-        worksheet.append_row([timestamp, user_id, log_string])
+        # 기본 정보
+        row_data = [timestamp, user_id]
+        
+        # 라운드 1~5 답변 순서대로 추출
+        # history는 리스트 형태이므로 순서대로 들어있음
+        for entry in data:
+            row_data.append(entry['prompt']) # 프롬프트 내용만 추출해서 칼럼 추가
+            
+        # 혹시 중간에 이탈해서 5라운드까지 안 채워졌을 경우 대비 (빈칸 채우기)
+        while len(row_data) < 7: # 시간(1) + ID(1) + 5라운드 = 총 7칼럼 필요
+            row_data.append("")
+            
+        # 저장 (append_row는 리스트를 한 행에 뿌려줌)
+        worksheet.append_row(row_data)
         return True
         
     except Exception as e:
