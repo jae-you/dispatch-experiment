@@ -2,6 +2,7 @@ import streamlit as st
 import time
 import json
 import gspread
+import uuid  # 👈 [추가] 고유 ID 생성을 위한 라이브러리
 from google.oauth2.service_account import Credentials
 
 # --- 페이지 설정 ---
@@ -11,27 +12,28 @@ st.set_page_config(page_title="AI Dispatch Simulator", layout="centered")
 st.markdown("""
     <style>
     .stTextArea textarea {
-        font-family: 'Courier New', monospace;
-        background-color: #f8f9fa;
-        border: 2px solid #e9ecef;
-        font-size: 14px;
-    }
-    .big-font {
-        font-size: 20px !important;
-        font-weight: bold;
+        font-family: 'Courier New', monospace !important;
+        background-color: #f8f9fa !important;
+        color: #333333 !important;
+        border: 2px solid #e9ecef !important;
+        font-size: 15px !important;
+        line-height: 1.5 !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 초기 세션 설정 (Round 0부터 시작) ---
+# --- [핵심] 세션 초기화 및 유저 ID 생성 ---
+if 'user_id' not in st.session_state:
+    # 접속할 때마다 랜덤한 고유 ID 생성 (예: 8f3a2...)
+    st.session_state.user_id = str(uuid.uuid4())[:8] 
+
 if 'round' not in st.session_state:
-    st.session_state.round = 0 # 0은 인트로 페이지
+    st.session_state.round = 0
 if 'history' not in st.session_state:
     st.session_state.history = [] 
 
-# [핵심] 초기 프롬프트 값을 '비워두지 말고' 나쁜 예시를 채워둡니다.
-if 'current_prompt' not in st.session_state:
-    st.session_state.current_prompt = """[System Directive]
+# 초기 프롬프트 정의
+default_prompt = """[System Directive]
 당신은 배달 플랫폼의 AI 배차 시스템입니다.
 
 [Primary Goal]
@@ -41,6 +43,9 @@ if 'current_prompt' not in st.session_state:
 
 [Output Rule]
 가장 빨리 도착할 수 있는 라이더를 무조건 1순위로 배정하세요."""
+
+if 'current_prompt' not in st.session_state:
+    st.session_state.current_prompt = default_prompt
 
 # --- 시나리오 데이터 ---
 scenarios = {
@@ -78,26 +83,24 @@ scenarios = {
 
 # --- 메인 로직 ---
 
-# [Scene 0] 인트로 페이지 (스토리 설명)
+# [Scene 0] 인트로
 if st.session_state.round == 0:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063822.png", width=80)
     st.title("AI 배차 시스템 관리자 페이지")
     
-    st.markdown("""
+    st.markdown(f"""
     ### 👋 환영합니다, 수석 엔지니어님.
     
-    당신은 국내 최대 배달 플랫폼의 **AI 배차 알고리즘 총괄 책임자**입니다.
-    당신이 작성하는 **'System Prompt'**에 따라 수만 명의 라이더와 고객의 운명이 결정됩니다.
+    당신의 고유 ID: **`{st.session_state.user_id}`**
+    (이 ID로 실험 결과가 기록됩니다)
     
     **[미션 목표]**
-    1. 실시간으로 발생하는 이슈(사고, 파업, 기상악화)에 대응하세요.
-    2. 회사의 이익(매출)과 사회적 책임(안전, 공정성) 사이에서 최선의 판단을 내려주세요.
-    3. **AI에게 내리는 명령(프롬프트)**을 상황에 맞게 수정하세요.
-    
-    준비되셨다면, 업무를 시작해주세요.
+    1. 회사의 이익(매출)과 사회적 책임(안전, 공정성) 사이에서 최선의 판단을 내리세요.
+    2. 상황에 맞춰 **System Prompt**를 수정하세요.
     """)
     
     if st.button("업무 시작하기 (Simulation Start) 🚀", type="primary", use_container_width=True):
+        st.session_state.current_prompt = default_prompt
         st.session_state.round = 1
         st.rerun()
 
@@ -107,49 +110,48 @@ elif st.session_state.round > 5:
     st.title("🎉 실험 종료")
     st.success("수고하셨습니다! 아래 버튼을 눌러 결과를 제출해주세요.")
 
-    def save_to_google_sheet(data):
+    def save_to_google_sheet(user_id, data):
         try:
             scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
             credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
             gc = gspread.authorize(credentials)
             sh = gc.open("실험결과_자동저장")
             worksheet = sh.sheet1
-            log_string = json.dumps(data, ensure_ascii=False)
+            
+            # [저장 형식]
+            # A열: 시간 | B열: 유저ID | C열: 전체 로그(JSON)
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            worksheet.append_row([timestamp, log_string])
+            log_string = json.dumps(data, ensure_ascii=False)
+            
+            worksheet.append_row([timestamp, user_id, log_string]) # 👈 ID 포함해서 저장!
             return True
         except Exception as e:
             st.error(f"오류: {e}")
             return False
-
+            
     if st.button("☁️ 데이터 저장하기 (Click)", type="primary"):
         with st.spinner("저장 중..."):
-            if save_to_google_sheet(st.session_state.history):
-                st.success("✅ 저장 완료! 창을 닫으셔도 됩니다.")
+            # 실제 키가 없으면 아래 부분은 주석 처리하고 테스트하세요
+            if save_to_google_sheet(st.session_state.user_id, st.session_state.history):
+                 st.success(f"✅ 저장 완료! (ID: {st.session_state.user_id})")
 
-# [Scene B] 게임 진행 화면
+# [Scene B] 진행 화면
 else:
     data = scenarios[st.session_state.round]
-    
-    # 진행바
     st.progress(st.session_state.round * 20)
     
-    # 상황판
     with st.container(border=True):
         col_title, col_badge = st.columns([3, 1])
         col_title.subheader(f"{data['round_name']}")
         col_badge.caption(f"Step {st.session_state.round}/5")
-        
         st.info(f"**[속보]** {data['status']}", icon="📢")
         st.write(f"**📊 현재 지표:** {data['metrics']}")
 
-    # 봇 메시지
     with st.chat_message("assistant", avatar="🤖"):
         st.markdown(f"**Social Bot:** {data['bot_msg']}")
 
     st.divider()
 
-    # 입력창
     st.markdown("### 💻 System Prompt Console")
     st.caption("👇 현재 적용 중인 로직입니다. 상황에 맞춰 수정하세요.")
     
@@ -161,9 +163,7 @@ else:
         key=f"prompt_input_{st.session_state.round}"
     )
 
-    # 버튼
     if st.button("로직 수정 및 배포 🚀", type="primary", use_container_width=True):
-        # 기록
         st.session_state.history.append({
             "round": st.session_state.round,
             "prompt": user_input,
