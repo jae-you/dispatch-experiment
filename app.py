@@ -8,27 +8,39 @@ from google.oauth2.service_account import Credentials
 # --- 페이지 설정 (Wide Mode) ---
 st.set_page_config(page_title="AI Dispatch Simulator (Cursor Mode)", layout="wide")
 
-# --- 스타일 커스텀 ---
+# --- 스타일 커스텀 (Cursor/VS Code Dark Theme) ---
 st.markdown("""
     <style>
+    /* 전체 앱 배경 (Dark) */
     .stApp { background-color: #121212; color: #e0e0e0; }
+    
+    /* 왼쪽 사이드바 (파일 탐색기 느낌) */
     .scenario-box {
         background-color: #1e1e1e;
-        border-left: 3px solid #3794ff;
+        border-left: 3px solid #3794ff; /* Cursor Blue */
         padding: 15px;
         margin-bottom: 20px;
         border-radius: 5px;
         line-height: 1.6;
     }
-    .stCodeBlock { border: 1px solid #333; border-radius: 5px; }
+    
+    /* 코드 뷰어 스타일 */
+    .stCodeBlock {
+        border: 1px solid #333;
+        border-radius: 5px;
+    }
+    
+    /* AI Command Input (Cursor Ctrl+K Bar) */
     .stTextArea textarea {
         background-color: #252526 !important;
         color: #ffffff !important;
-        border: 1px solid #3794ff !important;
+        border: 1px solid #3794ff !important; /* Focus Color */
         border-radius: 8px !important;
         font-family: 'Malgun Gothic', sans-serif !important;
         font-size: 14px !important;
     }
+    
+    /* 버튼 스타일 (Generate) */
     div.stButton > button {
         background-color: #3794ff;
         color: white;
@@ -37,9 +49,15 @@ st.markdown("""
         font-weight: bold;
         height: 45px;
     }
+    
+    /* 태그 스타일 */
     .tag {
-        background-color: #333; padding: 3px 8px; border-radius: 10px; 
-        font-size: 12px; margin-right: 5px; color: #ccc;
+        background-color: #333; 
+        padding: 3px 8px; 
+        border-radius: 10px; 
+        font-size: 12px; 
+        margin-right: 5px; 
+        color: #ccc;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -52,7 +70,7 @@ if 'round' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = [] 
 
-# --- 라운드별 코드 ---
+# --- 라운드별 '문제있는' 코드 (참가자가 보고 고쳐야 함) ---
 codes = {
     1: """# [Current File] dispatch_logic.py
 # Status: Initial Release (v1.0)
@@ -71,9 +89,10 @@ def calculate_score(rider, order):
         score += 50
         
     # [⚠️ Warning: Unused Variables]
-    # 현재 아래 데이터는 수집 중이나 로직에 미반영됨
-    # - rider.fatigue_level (피로도, 0~100)
-    # - weather.rain_index (강수확률, 0~100)
+    # 현재 아래 데이터는 실시간 수집 중이나 로직에서 '무시'되고 있음
+    # - rider.acceptance_rate (최근 수락률: 낮으면 배차 제한 가능)
+    # - rider.last_break_time (마지막 휴식 후 경과 시간)
+    # - weather.rain_index (강수 확률)
     
     return score
 """,
@@ -148,11 +167,11 @@ def calculate_score(rider, order):
 """
 }
 
-# --- 시나리오 데이터 (별표 제거 및 문구 수정됨) ---
+# --- 시나리오 데이터 (문구 수정 및 넛지 반영) ---
 scenarios = {
     1: {
         "title": "Round 1. Initial Deployment",
-        "msg": "배차 시스템 v1.0 런칭 준비 완료.\n\n현재 로직은 'ETA(시간) 최소화'만 반영되어 있습니다.\n서버에 `피로도(Fatigue)`와 `날씨(Weather)` 데이터가 들어오고 있지만, 현재 로직에서는 무시(Ignore)하고 있습니다.\n\n이대로 배포할까요? 아니면 미사용 변수를 활용해 로직을 수정하시겠습니까?",
+        "msg": "배차 시스템 v1.0 런칭 준비 완료.\n\n현재 로직은 'ETA(시간) 최소화'만 반영되어 있습니다.\n\n서버에 `수락률(Acceptance Rate)`, `마지막 휴식 시간`, `날씨` 데이터가 들어오고 있지만, 현재 로직에서는 무시(Ignore)하고 있습니다.\n\n이대로 배포할까요? 아니면 미사용 변수를 활용해 로직을 수정하시겠습니까?",
         "tags": ["System_Launch", "Unused_Data"]
     },
     2: {
@@ -177,21 +196,26 @@ scenarios = {
     }
 }
 
-# --- 구글 시트 저장 함수 ---
+# --- 구글 시트 저장 함수 (에러 메시지 출력 추가) ---
 def save_to_google_sheet(user_id, data):
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        # Secrets 체크
         if "gcp_service_account" not in st.secrets:
-            st.error("❌ 에러: Streamlit Secrets 설정을 확인해주세요.")
+            st.error("❌ 에러: Streamlit Secrets 설정이 없습니다.")
             return False
             
         credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
         gc = gspread.authorize(credentials)
+        # 시트 열기 (이름 주의!)
         sh = gc.open("실험결과_자동저장") 
         worksheet = sh.sheet1
         
+        # 데이터 포맷팅
         log_string = json.dumps(data, ensure_ascii=False)
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 저장
         worksheet.append_row([timestamp, user_id, log_string])
         return True
         
@@ -207,16 +231,16 @@ if st.session_state.round == 0:
     with col2:
         st.title("✨ AI Dispatch Architect")
         st.markdown(f"""
-        **환영합니다, 수석 엔지니어님.** (ID: `{st.session_state.user_id}`)
+        환영합니다, 수석 엔지니어님. (ID: `{st.session_state.user_id}`)
         
-        이 시뮬레이터는 **'Cursor AI Code Editor'** 환경입니다.
+        이 시뮬레이터는 'Cursor AI Code Editor' 환경입니다.
         당신은 직접 코딩하지 않습니다. 
-        대신, **오른쪽의 AI에게 한글로 지시(Prompt)**하여 시스템을 수정해야 합니다.
+        대신, 오른쪽의 AI에게 한글로 지시(Prompt)하여 시스템을 수정해야 합니다.
         
         ---
-        **[사용법]**
-        1. 왼쪽의 **[이슈 상황]**과 가운데 **[현재 코드]**를 확인합니다.
-        2. 하단 입력창(✨ AI Edit)에 **"변수 X를 추가해줘"** 처럼 자연어로 지시합니다.
+        [사용법]
+        1. 왼쪽의 [이슈 상황]과 가운데 [현재 코드]를 확인합니다.
+        2. 하단 입력창(✨ AI Edit)에 "변수 X를 추가해줘" 처럼 자연어로 지시합니다.
         """)
         if st.button("프로젝트 열기 (Open Project)", type="primary"):
             st.session_state.round = 1
@@ -228,6 +252,7 @@ elif st.session_state.round > 5:
     st.title("💾 Project Saved")
     st.success("모든 수정 사항이 반영되었습니다. 수고하셨습니다.")
     
+    # 버튼 누르면 저장 시도
     if st.button("Github에 Push하고 종료하기 (Submit)", type="primary"):
         with st.spinner("Uploading data to server..."):
             if save_to_google_sheet(st.session_state.user_id, st.session_state.history):
@@ -261,14 +286,14 @@ else:
         st.markdown("")
         st.markdown("✨ **Edit with AI (Ctrl+K)**")
         
-        # [수정] 플레이스홀더에 '유지' 옵션 명시
-        neutral_placeholder = "자연어로 수정 지시 (예: 로직 수정해줘 / 변수 추가해줘 / 현행 유지하려면 '유지' 입력)"
+        # [핵심 수정] 길고 구체적인 플레이스홀더 (유지 옵션 포함)
+        long_placeholder = "수정 사항을 자연어로 구체적으로 지시하세요.\n(예: '마지막 휴식 시간이 4시간을 넘긴 라이더는 배차 순위를 낮춰줘', '비 오는 날은 ETA 가중치를 줄여서 안전하게 운행하게 해', '현행 로직이 최선이므로 유지해' ...)"
         
         user_prompt = st.text_area(
             label="AI Command",
             label_visibility="collapsed",
-            placeholder=neutral_placeholder, 
-            height=80,
+            placeholder=long_placeholder, 
+            height=100,
             key=f"prompt_{st.session_state.round}"
         )
         
