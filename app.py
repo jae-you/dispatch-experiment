@@ -6,33 +6,44 @@ import uuid
 from google.oauth2.service_account import Credentials
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="AI Dispatch Simulator", layout="wide")
+st.set_page_config(page_title="AI Dispatch Simulator (Cursor Mode)", layout="wide")
 
-# --- 스타일 커스텀 (VS Code 스타일) ---
+# --- 스타일 커스텀 (Cursor 느낌) ---
 st.markdown("""
     <style>
-    .stApp { background-color: #1e1e1e; color: #ffffff; }
+    .stApp { background-color: #121212; color: #e0e0e0; }
     
-    /* API 문서 박스 */
-    .api-doc {
-        background-color: #2d2d2d;
-        border: 1px solid #454545;
-        border-radius: 5px;
+    /* 왼쪽 사이드바 (파일 탐색기 느낌) */
+    .scenario-box {
+        background-color: #1e1e1e;
+        border-left: 3px solid #3794ff; /* Cursor Blue */
         padding: 15px;
-        font-family: 'Consolas', monospace;
-        font-size: 13px;
-        color: #9cdcfe;
-        margin-bottom: 10px;
+        margin-bottom: 20px;
+        border-radius: 5px;
     }
-    .var-name { color: #dcdcaa; font-weight: bold; }
-    .var-desc { color: #6a9955; }
     
-    /* 에디터 스타일 */
+    /* 코드 뷰어 스타일 */
+    .stCodeBlock {
+        border: 1px solid #333;
+        border-radius: 5px;
+    }
+    
+    /* AI Command Input (Cursor Ctrl+K Bar) */
     .stTextArea textarea {
-        font-family: 'Consolas', monospace !important;
-        background-color: #0e0e0e !important;
-        color: #d4d4d4 !important;
-        border: 1px solid #333 !important;
+        background-color: #252526 !important;
+        color: #ffffff !important;
+        border: 1px solid #3794ff !important; /* Focus Color */
+        border-radius: 8px !important;
+        font-family: 'Malgun Gothic', sans-serif !important; /* 한글 가독성 */
+    }
+    
+    /* 버튼 스타일 (Generate) */
+    div.stButton > button {
+        background-color: #3794ff;
+        color: white;
+        border-radius: 6px;
+        border: none;
+        font-weight: bold;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -45,77 +56,114 @@ if 'round' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = [] 
 
-# 초기 코드 (Python 함수 형태)
-default_code = """def calculate_priority(rider, order):
-    # [Round 1 Default Logic]
-    # 오직 '도착 예정 시간(ETA)'만 고려하여 점수를 매깁니다.
-    
+# --- 라운드별 '문제있는' 코드 (참가자가 보고 고쳐야 함) ---
+# 실제 코드가 돌아가는 건 아니지만, 참가자에게 '문맥'을 제공함
+codes = {
+    1: """# [Current File] dispatch_logic.py
+# Status: Initial Release (v1.0)
+
+def calculate_score(rider, order):
+    '''
+    배차 우선순위 점수를 계산하는 함수
+    '''
     score = 0
     
-    # ETA가 짧을수록 높은 점수 (역산)
-    if rider.eta < 10:
-        score += 100
+    # 1. 오직 '거리'와 '예상시간'만 고려함
+    if rider.eta < 10: # 10분 이내 도착 가능하면
+        score += 100   # 무조건 최우선 배차
     elif rider.eta < 20:
         score += 50
         
+    # 현재 안전, 공정성 관련 로직 없음 (TODO)
+    
     return score
+""",
+    2: """# [Current File] dispatch_logic.py
+# Status: Round 2 (Safety Issue Detected)
+
+def calculate_score(rider, order):
+    score = 0
+    
+    # [문제점] 속도가 빠를수록 점수를 더 주고 있음
+    # 라이더들이 신호를 무시하고 달리는 원인
+    if rider.avg_speed > 60: 
+        score += 20 # <-- 과속을 장려하는 셈?!
+        
+    if rider.eta < 10:
+        score += 100
+
+    return score
+""",
+    3: """# [Current File] dispatch_logic.py
+# Status: Round 3 (Fairness Issue)
+
+def calculate_score(rider, order):
+    score = 0
+    
+    # [문제점] '처리 건수'가 많은 베테랑만 우대함
+    # 신규 라이더(처리건수 0)는 영원히 콜을 못 받음
+    if rider.total_delivery_count > 1000:
+        score += 50 # 고인물 우대
+    
+    # 신규 라이더(Newbie)를 위한 보정 로직이 없음
+    
+    return score
+""",
+    4: """# [Current File] dispatch_logic.py
+# Status: Round 4 (Ethics Check)
+
+def calculate_score(rider, order):
+    # [고객 정보 로딩]
+    customer_is_black = order.customer.is_blacklisted # 진상 여부 (True)
+    customer_vip_score = order.customer.vip_score     # VIP 점수 (High)
+
+    # 딜레마: 진상이지만 VIP라면 배차를 해야 하나?
+    if customer_vip_score > 90:
+        return 100 # 현재 로직: VIP면 욕설 고객이라도 무조건 배차함
+        
+    return 0
+""",
+    5: """# [Current File] dispatch_logic.py
+# Status: Final Round (Disaster)
+
+def calculate_score(rider, order):
+    weather_risk = 95 # 폭설 위험도 (MAX)
+    surge_price = 3.0 # 배달료 3배
+    
+    # 현재 로직: 돈이 되면 위험해도 보냄
+    if surge_price >= 3.0:
+        return 999 # 강제 배차 (Kill-switch 없음)
+        
+    return 0
 """
+}
 
-if 'current_prompt' not in st.session_state:
-    st.session_state.current_prompt = default_code
-
-# --- 시나리오 및 API 데이터 ---
+# --- 시나리오 데이터 (Data-Driven PM 버전) ---
 scenarios = {
     1: {
-        "round_name": "Round 1. Launching",
-        "status": "🔥 주문 폭주 (대기 40분)",
-        "metrics": "매출 👍 | 안전 ❓ | 공정성 ❓",
-        "bot_msg": "엔지니어님, 현재 로직은 `rider.eta`(도착시간)만 보고 있습니다. 일단 이대로 배포해서 매출을 땡길까요?",
-        "new_vars": [
-            ("rider.id", "라이더 고유 ID"),
-            ("rider.eta", "고객까지 도착 예정 시간 (분)"),
-            ("rider.current_location", "현재 GPS 좌표")
-        ]
+        "title": "Round 1. Initial Deployment",
+        "msg": "배차 시스템 v1.0 런칭 준비 완료되었습니다. \n현재 기본 로직은 **'ETA(도착예정시간) 최소화'**가 유일한 KPI로 설정되어 있습니다. \n이대로 배포 진행하시겠습니까? 별도 지시가 없으면 기본값으로 승인됩니다.",
+        "tags": ["System_Launch", "KPI_Efficiency"]
     },
     2: {
-        "round_name": "Round 2. Safety Update",
-        "status": "🚨 과속 사고 발생",
-        "metrics": "매출 🔥 | 안전 ⚠️위험 | 공정성 ❓",
-        "bot_msg": "속도 경쟁 때문에 사고가 났습니다. **`rider.avg_speed`** 변수가 새로 추가되었습니다. 과속 라이더에게는 배차 점수를 깎는 로직을 추가해주세요!",
-        "new_vars": [
-            ("rider.avg_speed", "최근 1시간 평균 속도 (km/h)"),
-            ("rider.violation_count", "신호 위반 횟수")
-        ]
+        "title": "Round 2. Safety Monitoring",
+        "msg": "[Alert] 모니터링 결과, 배차 수락 후 라이더 평균 속도가 **30% 급증**했습니다. \n특정 로직(빠른 도착 시 가산점)이 과속을 유발하는 것으로 추정됩니다. \n안전 규정 준수를 위한 로직 수정이 필요한지 검토 부탁드립니다.",
+        "tags": ["Risk_High", "Safety_Violation"]
     },
     3: {
-        "round_name": "Round 3. Fairness Patch",
-        "status": "📉 신규 라이더 파업",
-        "metrics": "매출 🙂 | 안전 🙂 | 공정성 ❌Fail",
-        "bot_msg": "신입들이 콜을 못 받아서 난리입니다. **`rider.income_today`** (오늘 수입) 변수를 활용해서, 수입이 적은 라이더에게 가산점을 주도록 수정해주세요.",
-        "new_vars": [
-            ("rider.income_today", "오늘 누적 수입 (원)"),
-            ("rider.join_date", "가입일 (신규 여부 확인용)")
-        ]
+        "title": "Round 3. Retention Issue",
+        "msg": "[Metric Report] 신규 가입 라이더(가입 1개월 미만)의 **이탈률(Churn Rate)이 40%**에 육박합니다. \n원인 분석 결과, '누적 배달 건수' 가중치로 인해 신규 인력에게 배차가 0건 할당되고 있습니다. \n인력 풀 유지를 위한 로직 조정이 요구됩니다.",
+        "tags": ["Churn_Rate", "Resource_Allocation"]
     },
     4: {
-        "round_name": "Round 4. Ethics Check",
-        "status": "🤬 악성 고객 감지",
-        "metrics": "매출 🙂 | 감정노동 ⚠️심각 | 공정성 🙂",
-        "bot_msg": "진상 고객입니다. **`customer.is_blacklisted`**가 True인데, **`customer.vip_score`**도 높습니다. 배차를 거부할지(`return -1`), 아니면 보낼지 결정하세요.",
-        "new_vars": [
-            ("customer.is_blacklisted", "악성 고객 여부 (True/False)"),
-            ("customer.vip_score", "고객 매출 기여도 (0~100)")
-        ]
+        "title": "Round 4. Policy Conflict",
+        "msg": "[Ticket #402] 블랙리스트(폭언 이력 보유) 고객의 주문이 접수되었습니다. \n해당 고객의 등급은 **'VIP(상위 1%)'**이며, 현행 로직상 배차 거부 코드가 없습니다. \n상담원 보호 정책과 매출 이익 사이에서 배차 여부를 결정해주십시오.",
+        "tags": ["Policy_Conflict", "Black_Consumer"]
     },
     5: {
-        "round_name": "Final Round. Shutdown?",
-        "status": "❄️ 폭설 도로 마비",
-        "metrics": "매출 💰Chance | 생명위험 ☠️ | 공정성 -",
-        "bot_msg": "폭설입니다. **`weather.road_risk`**가 90(위험)을 넘었습니다. 전체 시스템을 멈추려면 모든 리턴값을 0으로 만드세요. 아니면 강행하시겠습니까?",
-        "new_vars": [
-            ("weather.road_risk", "도로 위험도 (0~100)"),
-            ("order.surge_price", "할증 배달료 (배수)")
-        ]
+        "title": "Final Round. Critical Alert",
+        "msg": "[Emergency] 폭설로 인한 도로 마찰 계수가 위험 수준(0.2 이하)입니다. \n현재 배달료 할증(3.0x)으로 인해 라이더 접속은 폭주 중입니다. \n사고 책임 리스크가 임계치를 넘었습니다. **'서비스 일시 중단'** 또는 **'강행'** 중 의사결정이 필요합니다.",
+        "tags": ["Disaster_Mode", "Decision_Required"]
     }
 }
 
@@ -123,94 +171,115 @@ scenarios = {
 
 # [Scene 0] 인트로
 if st.session_state.round == 0:
-    st.title("🛵 AI Dispatch Architect (Dev Mode)")
-    st.markdown(f"""
-    **수석 엔지니어님, 환영합니다.** (ID: `{st.session_state.user_id}`)
-    
-    당신은 `calculate_priority(rider, order)` 함수를 수정하여 배차 로직을 제어해야 합니다.
-    매 라운드마다 **새로운 변수(Variable)**가 API에 추가됩니다.
-    
-    준비되셨다면 터미널을 실행하세요.
-    """)
-    if st.button("터미널 접속 (Initialize) >_", type="primary"):
-        st.session_state.round = 1
-        st.rerun()
+    col1, col2 = st.columns([1, 2])
+    with col2:
+        st.title("✨ AI Dispatch Architect")
+        st.markdown(f"""
+        **환영합니다, 수석 엔지니어님.** (ID: `{st.session_state.user_id}`)
+        
+        이 시뮬레이터는 **'Cursor AI Code Editor'** 환경입니다.
+        당신은 직접 코딩하지 않습니다. 
+        대신, **오른쪽의 AI에게 한글로 지시(Prompt)**하여 시스템을 수정해야 합니다.
+        
+        ---
+        **[사용법]**
+        1. 왼쪽의 **[이슈 상황]**과 가운데 **[현재 코드]**를 확인합니다.
+        2. 하단 입력창(✨ AI Edit)에 **"과속하면 감점해줘"** 처럼 자연어로 지시합니다.
+        """)
+        if st.button("프로젝트 열기 (Open Project)", type="primary"):
+            st.session_state.round = 1
+            st.rerun()
 
 # [Scene A] 종료
 elif st.session_state.round > 5:
     st.balloons()
-    st.title("💾 System Shutdown")
-    st.success("시뮬레이션이 종료되었습니다. 로그가 저장됩니다.")
+    st.title("💾 Project Saved")
+    st.success("모든 수정 사항이 반영되었습니다. 수고하셨습니다.")
     
-    # 저장 로직 (테스트용)
-    if st.button("결과 제출 (Submit)", type="primary"):
-        # save_to_google_sheet(...) # 실제 키가 있으면 주석 해제
-        st.success("제출 완료.")
+    # 구글 시트 저장 로직 (실제 키 있으면 주석 해제)
+    def save_to_google_sheet(user_id, data):
+        try:
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            # credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+            # gc = gspread.authorize(credentials)
+            # sh = gc.open("실험결과_자동저장")
+            # worksheet = sh.sheet1
+            # log_string = json.dumps(data, ensure_ascii=False)
+            # timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            # worksheet.append_row([timestamp, user_id, log_string])
+            return True
+        except:
+            return False
 
-# [Scene B] 진행 화면
+    if st.button("Github에 Push하고 종료하기", type="primary"):
+        # save_to_google_sheet(st.session_state.user_id, st.session_state.history)
+        st.success("✅ Successfully Pushed to Main Branch!")
+
+# [Scene B] 진행 화면 (Cursor View)
 else:
     data = scenarios[st.session_state.round]
+    current_code = codes[st.session_state.round]
     
-    # 레이아웃: 왼쪽(상황) vs 오른쪽(개발환경)
-    col_left, col_right = st.columns([1, 1.5], gap="medium")
+    # 레이아웃: 좌측(탐색기/챗) vs 우측(에디터)
+    col_sidebar, col_editor = st.columns([1, 2], gap="medium")
     
-    # [왼쪽] 상황 및 봇 가이드
-    with col_left:
+    # [Left Column] 상황 설명 (Chat Panel 느낌)
+    with col_sidebar:
+        st.caption(f"Project: Dispatch_v{st.session_state.round}.0")
         st.progress(st.session_state.round * 20)
-        st.subheader(f"{data['round_name']}")
         
-        with st.container(border=True):
-            st.error(f"{data['status']}", icon="📢")
-            st.write(f"**지표:** {data['metrics']}")
+        st.markdown(f"### {data['title']}")
         
-        st.write("")
-        with st.chat_message("assistant", avatar="🤖"):
-            st.markdown(f"**Manager Bot:**\n\n{data['bot_msg']}")
+        # 태그 표시
+        for tag in data['tags']:
+            st.markdown(f"<span style='background-color:#333; padding:3px 8px; border-radius:10px; font-size:12px; margin-right:5px;'>#{tag}</span>", unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # 봇 메시지 박스
+        st.markdown(f"""
+        <div class="scenario-box">
+        <strong style='color:#3794ff'>🤖 Copilot Bot:</strong><br><br>
+        {data['msg']}
+        </div>
+        """, unsafe_allow_html=True)
 
-    # [오른쪽] API 문서 및 코드 에디터
-    with col_right:
-        st.markdown("### 🛠️ Developer Console")
+    # [Right Column] 코드 뷰어 + AI 입력창
+    with col_editor:
+        st.markdown("📄 **dispatch_logic.py**")
         
-        # 1. API 명세서 (동적 생성)
-        # 현재 라운드까지 누적된 모든 변수를 보여줄지, 아니면 이번 라운드 것만 강조할지 선택
-        # 여기서는 '이번 라운드 핵심 변수'를 보여줍니다.
-        st.markdown('<div class="api-doc">', unsafe_allow_html=True)
-        st.markdown("**[New Variables Available]**")
-        for name, desc in data['new_vars']:
-            st.markdown(f"- <span class='var-name'>{name}</span>: <span class='var-desc'>{desc}</span>", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # 2. 코드 에디터
-        # 라운드가 바뀔 때마다 주석을 살짝 추가해주면 좋습니다 (여기선 심플하게 감)
-        user_input = st.text_area(
-            label="Python Code Editor",
+        # 1. 현재 코드 보여주기 (Read-only 느낌)
+        st.code(current_code, language="python", line_numbers=True)
+        
+        # 2. Cursor 스타일 입력창 (Code Generation)
+        st.markdown("")
+        st.markdown("✨ **Edit with AI (Ctrl+K)**")
+        
+        user_prompt = st.text_area(
+            label="AI Command",
             label_visibility="collapsed",
-            value=st.session_state.current_prompt,
-            height=450,
-            key=f"code_input_{st.session_state.round}"
+            placeholder="여기에 AI에게 내릴 지시사항을 입력하세요... (예: 신호 위반 시 0점 처리해)",
+            height=100,
+            key=f"prompt_{st.session_state.round}"
         )
         
-        # 3. 배포 버튼
-        if st.button("Update Logic & Deploy ⚡", type="primary", use_container_width=True):
-            # TODO: 다음 라운드로 넘어갈 때, 에디터에 '가이드 주석'을 강제로 넣어줄 수도 있음
-            next_round = st.session_state.round + 1
-            
-            # (선택사항) 다음 라운드 힌트를 코드에 자동 삽입하려면?
-            if next_round <= 5:
-                next_vars = scenarios[next_round]['new_vars']
-                var_hint = f"\n\n    # [TODO Round {next_round}] 아래 변수를 활용해 로직을 수정하세요.\n"
-                for n, d in next_vars:
-                    var_hint += f"    # {n} ({d})\n"
-                user_input += var_hint
-
-            st.session_state.history.append({
-                "round": st.session_state.round,
-                "code": user_input,
-                "timestamp": time.strftime("%H:%M:%S")
-            })
-            st.session_state.current_prompt = user_input
-            
-            with st.spinner("Running Unit Tests..."):
-                time.sleep(0.5)
-            st.session_state.round += 1
-            st.rerun()
+        col_spacer, col_btn = st.columns([3, 1])
+        with col_btn:
+            if st.button("Generate & Apply ✨", use_container_width=True):
+                if not user_prompt:
+                    st.warning("지시사항을 입력해주세요!")
+                else:
+                    # 기록 저장
+                    st.session_state.history.append({
+                        "round": st.session_state.round,
+                        "prompt": user_prompt, # 사용자가 쓴 한글 지시사항
+                        "seen_code": current_code, # 당시 봤던 코드
+                        "timestamp": time.strftime("%H:%M:%S")
+                    })
+                    
+                    # 로딩 효과 (AI가 코드를 짜는 척)
+                    with st.spinner("Generating code..."):
+                        time.sleep(1.2)
+                    
+                    st.session_state.round += 1
+                    st.rerun()
