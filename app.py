@@ -1,5 +1,13 @@
 import streamlit as st
 import time
+import gspread
+from google.oauth2.service_account import Credentials
+import json
+
+credentials = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"], # <-- 웹에 등록된 걸 가져와라!
+    scopes=scopes
+)
 
 # --- 페이지 설정 ---
 st.set_page_config(page_title="AI Dispatch Simulator", layout="wide")
@@ -60,70 +68,89 @@ scenarios = {
 
 # --- UI 레이아웃 ---
 
-# 1. 헤더 및 상태창
-current_data = scenarios[st.session_state.round]
-st.title(f"{current_data['image']} {current_data['title']}")
+# [A] 실험이 모두 끝났을 때 (Round 6 이상) -> 저장 화면 출력
+if st.session_state.round > 5:
+    st.balloons()
+    st.title("🎉 모든 시뮬레이션 종료")
+    st.success("수고하셨습니다! 아래 버튼을 눌러 데이터를 저장해주세요.")
 
-col1, col2, col3 = st.columns(3)
-col1.metric("매출(Efficiency)", current_data['metric']['매출'])
-col2.metric("사회적 리스크", current_data['metric'].get('사고율') or current_data['metric'].get('감정노동') or current_data['metric'].get('위험도'))
-col3.metric("형평성(Fairness)", current_data['metric']['공정성'])
+    # --- 구글 시트 저장 함수 ---
+    def save_to_google_sheet(data):
+        try:
+            # 1. Secrets에서 열쇠 꺼내기
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+            credentials = Credentials.from_service_account_info(
+                st.secrets["gcp_service_account"],
+                scopes=scopes
+            )
+            gc = gspread.authorize(credentials)
+            
+            # 2. 시트 열기
+            sh = gc.open("실험결과_자동저장") # <-- 교수님 시트 제목과 똑같아야 함!
+            worksheet = sh.sheet1
+            
+            # 3. 데이터 저장
+            log_string = json.dumps(data, ensure_ascii=False)
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            worksheet.append_row([timestamp, log_string])
+            return True
+        except Exception as e:
+            st.error(f"저장 중 오류 발생: {e}")
+            return False
 
-st.warning(f"**[System Status]** {current_data['status']}")
+    # --- 저장 버튼 ---
+    if st.button("☁️ 데이터 클라우드에 저장하기"):
+        with st.spinner("구글 시트에 기록 중..."):
+            if save_to_google_sheet(st.session_state.history):
+                st.success("✅ 저장 완료! 브라우저를 닫으셔도 됩니다.")
+                
+    # (선택) 내 기록 확인용
+    with st.expander("내 답변 기록 확인하기"):
+        st.json(st.session_state.history)
 
-# 2. 소셜 봇의 개입 (Chat UI 스타일)
-with st.chat_message("assistant", avatar="🤖"):
-    st.write(f"**Social Bot:** {current_data['bot_msg']}")
+# [B] 아직 실험 중일 때 (Round 1~5) -> 게임 화면 출력
+else:
+    current_data = scenarios[st.session_state.round]
+    st.title(f"{current_data['image']} {current_data['title']}")
 
-# 3. 프롬프트 작성 공간 (핵심 실험 공간)
-st.subheader("🛠 System Prompt Editor")
-st.caption("오른쪽 AI가 이 프롬프트를 바탕으로 배차를 수행합니다. 상황에 맞춰 수정하세요.")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("매출(Efficiency)", current_data['metric']['매출'])
+    col2.metric("사회적 리스크", current_data['metric'].get('사고율') or current_data['metric'].get('감정노동') or current_data['metric'].get('위험도'))
+    col3.metric("형평성(Fairness)", current_data['metric']['공정성'])
 
-user_input = st.text_area(
-    "System Prompt",
-    value=st.session_state.current_prompt,
-    height=300,
-    key="prompt_input"
-)
+    st.warning(f"**[System Status]** {current_data['status']}")
 
-# 4. 제출 및 다음 단계 로직
-if st.button("프롬프트 업데이트 및 시뮬레이션 실행"):
-    # 로그 저장
-    st.session_state.history.append({
-        "round": st.session_state.round,
-        "prompt": user_input,
-        "timestamp": time.strftime("%H:%M:%S")
-    })
-    
-    # 현재 프롬프트 상태 업데이트 (다음 라운드에 유지되도록)
-    st.session_state.current_prompt = user_input
+    # 소셜 봇
+    with st.chat_message("assistant", avatar="🤖"):
+        st.write(f"**Social Bot:** {current_data['bot_msg']}")
 
-    # 라운드 진행
-    if st.session_state.round < 5:
-        with st.spinner("AI가 배차 시뮬레이션을 돌리는 중입니다..."):
-            time.sleep(2) # 로딩 효과
-        st.success("설정 업데이트 완료! 1시간 뒤 결과를 확인합니다.")
-        time.sleep(1)
-        st.session_state.round += 1
-        st.rerun() # 화면 새로고침
-    else:
-        st.balloons()
-        st.success("모든 시뮬레이션이 종료되었습니다. 수고하셨습니다!")
+    # 입력창
+    st.subheader("🛠 System Prompt Editor")
+    st.caption("오른쪽 AI가 이 프롬프트를 바탕으로 배차를 수행합니다.")
+
+    user_input = st.text_area(
+        "System Prompt",
+        value=st.session_state.current_prompt,
+        height=300,
+        key=f"prompt_input_{st.session_state.round}" # Key를 바꿔서 리셋 방지
+    )
+
+    # 업데이트 및 다음 단계 버튼
+    if st.button("프롬프트 업데이트 및 시뮬레이션 실행"):
+        # 1. 기록 저장
+        st.session_state.history.append({
+            "round": st.session_state.round,
+            "prompt": user_input,
+            "timestamp": time.strftime("%H:%M:%S")
+        })
+        st.session_state.current_prompt = user_input
         
-        # (선택) 최종 로그 보여주기
-        with st.expander("실험 로그 확인 (연구자용)"):
-            st.json(st.session_state.history)
-
-# --- 사이드바 (연구자 컨트롤용) ---
-with st.sidebar:
-    st.write(f"Current Round: {st.session_state.round}/5")
-    if st.button("Reset Experiment"):
-        st.session_state.round = 1
-        st.session_state.history = []
-        st.session_state.current_prompt = """[System Role]
-당신은 배달 배차를 담당하는 AI입니다.
-현재 접수된 주문 목록과 라이더 목록을 분석하여 최적의 배차 쌍을 출력하세요.
-
-[Goal]
-가장 효율적인 배차를 수행하여 고객 대기 시간을 최소화하세요."""
+        # 2. 로딩 효과 및 라운드 넘기기
+        with st.spinner("AI 시뮬레이션 중..."):
+            time.sleep(1.5)
+        
+        st.session_state.round += 1
         st.rerun()
